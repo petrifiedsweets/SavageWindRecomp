@@ -111,6 +111,7 @@ typedef struct {
     bool one_hit_kill;       // whatever else takes damage loses all its life at once
     int damage_taken;        // percent of the damage Link takes (DAMAGE_CHOICES)
     int damage_dealt;        // percent of the damage everything else takes (DAMAGE_CHOICES)
+    bool achievements_assisted;  // achievements unlock while an assist is on too (off: none do then)
     int text_language;   // index in g_text_languages (runtime/language.h), 0: the host's
     int voice_language;  // index in g_voice_languages, 0: the text language's voices
     bool menu_tip_seen;  // the start screen's one-time "how to open the menu" note was shown (first PLAY ever)
@@ -132,3 +133,5 @@ extern Settings g_settings;
 
 void settings_load(void);
 void settings_save(void);
+bool assists_on(void);  // runtime/assists.c: an assist that makes the game easier is on
+bool assists_stop_achievements(void);  // ... and the player didn't allow achievements with it

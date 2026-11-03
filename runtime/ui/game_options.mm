@@ -743,9 +743,15 @@ void build_items(void) {
     v.push_back(toggle(P_ACCESS, "Infinite stamina", "The stamina wheel never runs out.",
                        [](const Item &) { return (int)g_settings.infinite_stamina; },
                        [](const Item &, int x) { g_settings.infinite_stamina = x; }, 0));
+    // Achievements (runtime/achievements_watch.c ach_block_check): an assist stops them unless the player allows them
+    // here. Without one they unlock anyway, and the row shows On.
+    v.push_back(toggle(P_ACCESS, "Achievements", "With an assist on they're off, unless you turn them on here.",
+                       [](const Item &) { return (int)!assists_stop_achievements(); },
+                       [](const Item &, int x) { g_settings.achievements_assisted = x; }, 0));
 
     // Achievements (runtime/achievements.h): one row per achievement, its state where a button's text goes (Unlocked, or
-    // how far along it is, or Locked); the description line says what it takes, and when it was unlocked. A does nothing.
+    // how far along it is, or Locked, or Assisted); the description line says what it takes, and when it was unlocked. A
+// does nothing.
     for (int i = 0; i < g_ach_count; i++) {
         Item it = button(P_ACHIEVEMENTS, g_ach_defs[i].name, g_ach_defs[i].desc, nullptr, A_NONE, i);
         it.label = [](const Item &row, int) -> const char * {
@@ -753,6 +759,7 @@ void build_items(void) {
             AchInfo in;
             ach_info(row.arg, &in);
             if (in.unlocked) return tr("Unlocked");
+            if (in.barred) return tr("Assisted");  // (met with an assist on: not in this playthrough)
             if (in.target <= 1) return tr("Locked");
             snprintf(buf, sizeof buf, "%u / %u  (%u%%)", in.cur, in.target, in.cur * 100 / in.target);
             return buf;
@@ -1038,6 +1045,7 @@ extern "C" int rt_opt_store(uint64_t row) {
         }
         mark_all_rows(rd64(row));
     }
+    if (it->page == P_ACCESS) mark_all_rows(rd64(row));  // (the Achievements row follows the assists)
     if (past_end) g_dirty.push_back(row);                // (first: the row shows the value at the other end)
     return 1;
 }

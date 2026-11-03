@@ -20,6 +20,8 @@
 const char *g_save_dir = "save";
 static bool warp;
 bool test_warp_active(void) { return warp; }
+static bool assisted;
+bool assists_stop_achievements(void) { return assisted; }
 void ach_live_start(void) {}  // (the game's memory: runtime/achievements_live.c)
 void ach_live_stop(void) {}
 
@@ -324,6 +326,65 @@ int main(void) {
     ach_info(idx("hearts_30"), &in);
     CHECK(in.cur == 30 && !in.unlocked);
     ach_set_blocked(false);
+
+    // an assist on (Options > Accessibility): what becomes met while playing is barred for the playthrough - also once
+    // the assist is off, in the saves the game writes after, and from the game's flags; what was unlocked before stays,
+    // and the file keeps it
+    {
+#define SLOT_X0 "xsave/save_5/0/game_data.sav"
+#define SLOT_X1 "xsave/save_5/1/game_data.sav"
+        unlink("achievements.txt");
+        ach_state_load("achievements.txt");
+        Buf x = new_save();
+        add(&x, "IsGet_PlayerStole2", 1);
+        AchSave xs = as(&x);
+        ach_set_active(SLOT_X0);
+        CHECK(ach_update(SLOT_X0, &xs, 91000) == 1 && is_unlocked("paraglider"));
+        assisted = true, ach_block_check();
+        add(&x, "MaxHartValue", 84);
+        add(&x, "Clear_RemainsWater", 1);
+        xs = as(&x);
+        ach_set_active(SLOT_X0);
+        CHECK(ach_update(SLOT_X0, &xs, 91100) == 0 && is_unlocked("paraglider") && !is_unlocked("hearts_20"));
+        ach_info(idx("beast_ruta"), &in);
+        CHECK(!in.unlocked && in.barred);
+        assisted = false, ach_block_check();
+        ach_set_active(SLOT_X1);  // (an autosave in another slot, the assist off)
+        CHECK(ach_update(SLOT_X1, &xs, 91200) == 0 && is_unlocked("paraglider") && !is_unlocked("hearts_20") &&
+              !is_unlocked("beast_ruta"));
+        add(&x, "Clear_RemainsFire", 1);  // (met without one: unlocks)
+        xs = as(&x);
+        ach_set_active(SLOT_X1);
+        CHECK(ach_update(SLOT_X1, &xs, 91300) == 1 && is_unlocked("beast_rudania") && !is_unlocked("beast_ruta"));
+        ach_state_load("achievements.txt");
+        ach_game_loaded(SLOT_X1);
+        ach_info(idx("hearts_20"), &in);
+        CHECK(!in.unlocked && in.barred && is_unlocked("beast_rudania"));
+        // the game's flags: 30 hearts with an assist on, then a save written with it off
+        CHECK(ach_live_update(&xs, 92000) == 0);  // (the first look: quiet)
+        assisted = true, ach_block_check();
+        Buf y = new_save();
+        add(&y, "MaxHartValue", 120);
+        y.d = realloc(y.d, y.n + x.n - 0xC);
+        memcpy(y.d + y.n, x.d + 0xC, x.n - 0xC);
+        y.n += x.n - 0xC;
+        AchSave ys = as(&y);
+        CHECK(ach_live_update(&ys, 92020) == 0 && !is_unlocked("hearts_30"));
+        assisted = false, ach_block_check();
+        ach_set_active(SLOT_X1);
+        CHECK(ach_update(SLOT_X1, &ys, 92100) == 0 && !is_unlocked("hearts_30"));
+        ach_info(idx("hearts_30"), &in);
+        CHECK(in.barred);
+        // allowed with assists (the Achievements row on: assists_stop_achievements is false), as without one
+        add(&x, "Clear_RemainsWind", 1);
+        xs = as(&x);
+        ach_set_active(SLOT_X1);
+        CHECK(ach_update(SLOT_X1, &xs, 92200) == 1 && is_unlocked("beast_medoh"));
+        while (ach_toast_take(&t)) {}
+        free(x.d); free(y.d);
+        unlink("achievements.txt");
+        ach_state_load("achievements.txt");  // (the game's flags as they were: none looked at)
+    }
 
     // a flag by its hash ("#<hex crc32>"), for one whose name isn't known
     {

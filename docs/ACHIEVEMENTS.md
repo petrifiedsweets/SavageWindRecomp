@@ -76,7 +76,12 @@ Savage Wind has a small achievement system that never touches the game: it reads
   Yaz0, a BFRES holding one BNTX texture, RGBA8 in the console's block-linear layout) or a Hyrule Compendium photo
   (`UI/PictureBook/<name>.jpg`). They show on the notice and in the overlay's tab; with neither, the gold triangles.
 - **No cheating by accident**: while a test warp / flag edit is active (`SAVAGEWIND_TEST_*`) progress is tracked but nothing
-  unlocks. Anything that later gives assists (infinite stamina, no damage, teleport) should call `ach_set_blocked(true)`.
+  unlocks (`ach_set_blocked`). While an assist of Options > Accessibility is on (`assists_on` in `runtime/assists.c`:
+  God mode, One-hit kill, Unbreakable weapons, Infinite arrows / stamina, less damage taken or more dealt), what becomes
+  met while playing is barred for that playthrough (`ach_set_assisted`): it doesn't unlock then, nor once the assist is
+  off - the saves the game writes after take the mark over (`~id` in `achievements.txt`), and the menus show it as
+  Assisted. What was unlocked before stays. The Accessibility page's Achievements row (`achievements_with_assists` in
+  the ini, off by default) allows them with assists: nothing is barred then. `ach_block_check` sets both before each look.
 
 ## Adding or fixing one
 

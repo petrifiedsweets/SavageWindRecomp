@@ -221,6 +221,8 @@ void ach_ui_tab(void) {
 #endif
             strftime(when, sizeof when, "%Y-%m-%d %H:%M", &tmv);
             ImGui::TextColored(GREY, "    %s %s", tr("Unlocked"), when);
+        } else if (in.barred) {
+            ImGui::TextColored(GREY, "    %s", tr("Met with an assist on: not in this playthrough."));
         } else if (!in.unlocked && in.target > 1) {
             char buf[32];
             snprintf(buf, sizeof buf, "%u / %u", in.cur, in.target);

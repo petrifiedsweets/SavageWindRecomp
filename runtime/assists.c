@@ -49,3 +49,13 @@ uint32_t rt_stamina(uint32_t oldv, uint32_t newv) {
 // Infinite arrows: the bow's shot takes its arrows off the pouch through one function, which returns before taking
 // any (tools/patches.py _remove_arrows). One arrow is still needed to shoot.
 int rt_infinite_arrows(void) { return g_settings.infinite_arrows; }
+
+// Achievements stop while one of these is on, unless Accessibility's Achievements row allows them
+// (runtime/achievements_watch.c ach_block_check). The damage multipliers count only the easier way: less damage taken,
+// more dealt.
+bool assists_on(void) {
+    const Settings *s = &g_settings;
+    return s->god_mode || s->one_hit_kill || s->no_weapon_wear || s->infinite_arrows || s->infinite_stamina ||
+           s->damage_taken < 100 || s->damage_dealt > 100;
+}
+bool assists_stop_achievements(void) { return assists_on() && !g_settings.achievements_assisted; }

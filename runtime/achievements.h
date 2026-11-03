@@ -76,7 +76,9 @@ void ach_def_flags(const AchDef *d, void (*cb)(const char *name, void *user), vo
 
 // ---- what has been earned ----
 void ach_state_load(const char *path);         // reads path (missing = nothing earned yet); later changes are saved there (per save file)
-void ach_set_blocked(bool blocked);            // true: progress is tracked but nothing unlocks (test warps, future assists)
+void ach_set_blocked(bool blocked);            // true: progress is tracked but nothing unlocks (test warps)
+void ach_set_assisted(bool assisted);          // true: an assist is on - what becomes met while playing is barred for good
+void ach_block_check(void);                    // both from test warps and from the assists (Options > Accessibility)
 // Achievements belong to a save: each game_data.sav has those its contents meet (a playthrough's progress only adds up).
 // What the menu and ach_info show is the save being played: the one the game loaded (opened to read) or saved last, or
 // before it opens one, the one written last. A save the game writes is announced against the one that was being played:
@@ -107,6 +109,7 @@ int ach_update_at(const char *save_path, const AchSave *s, time_t now, time_t wr
 typedef struct {
     const AchDef *def;
     bool unlocked;
+    bool barred;  // met with an assist on: it won't unlock in this playthrough
     time_t at;  // when (unlocked only)
     uint32_t cur, target;  // progress from the latest save looked at (0 / 0 before the first)
 } AchInfo;

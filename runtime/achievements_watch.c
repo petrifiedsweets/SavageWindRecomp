@@ -21,6 +21,7 @@
 
 extern const char *g_save_dir;  // runtime/services/fs.c
 bool test_warp_active(void);    // runtime/services/test_warp.c
+bool assists_stop_achievements(void);  // runtime/assists.c
 
 #define POLL_MS 2000
 #define MAX_FILES 32
@@ -123,6 +124,7 @@ static void *watch_thread(void *arg) {
     pthread_mutex_lock(&wlock);
     while (!stop_req) {
         pthread_mutex_unlock(&wlock);
+        ach_block_check();
         scan(g_save_dir && *g_save_dir ? g_save_dir : "save", 4, on_file);
         after_scan();
         pthread_mutex_lock(&wlock);
@@ -135,10 +137,18 @@ static void *watch_thread(void *arg) {
     return NULL;
 }
 
+// Test warps / flag edits would hand them out: nothing unlocks meanwhile. An assist makes them easier: what becomes met
+// with one on is barred for the playthrough, unless the Accessibility page's Achievements row allows them with assists
+// (settings.h achievements_assisted). Looked at before each look at the saves and the game's flags.
+void ach_block_check(void) {
+    ach_set_blocked(test_warp_active());
+    ach_set_assisted(assists_stop_achievements());
+}
+
 void ach_start(void) {
     if (running) return;
     ach_state_load("achievements.txt");  // (the data root is the working directory)
-    ach_set_blocked(test_warp_active());  // test warps / flag edits would hand them out
+    ach_block_check();
     stop_req = false;
     if (pthread_create(&thread, NULL, watch_thread, NULL) == 0) running = true;
     ach_live_start();

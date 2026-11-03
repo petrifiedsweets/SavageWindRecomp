@@ -227,6 +227,7 @@ typedef struct {
     char key[512];  // normalized path of the game_data.sav
     bool used;
     bool unlocked[MAX_ACH];
+    bool barred[MAX_ACH];  // met while playing with an assist on (ach_set_assisted): never unlocks in this playthrough
     time_t at[MAX_ACH];
     uint32_t cur[MAX_ACH], target[MAX_ACH];
     char extra[MAX_EXTRA][300];  // lines of ids this build doesn't know, kept as they are
@@ -240,12 +241,14 @@ typedef struct {
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static char state_path[1024];
 static bool blocked;
+static bool assisted;  // (ach_set_assisted)
 static Slot slots[MAX_SLOTS];
 static int active_slot = -1;  // the save being played
 static int toasts[MAX_TOAST], toast_head, toast_n;
 static bool g_live[MAX_ACH];    // what the game's flags in memory met at the latest ach_live_update
 static time_t g_live_quiet;     // ... which takes them without notices until then (a load, a new game)
 static bool g_live_first = true;  // (the first look takes them as they are too)
+static bool g_live_barred[MAX_ACH];  // ... and became met with an assist on (until the flags go back: a load, a new game)
 #define LIVE_SETTLE_S 10
 static bool g_global[MAX_ACH];  // ACH_MASTER achievements met in any save, and when
 static time_t g_global_at[MAX_ACH];
@@ -321,14 +324,15 @@ void ach_state_load(const char *path) {
     memset(slots, 0, sizeof slots);
     memset(g_global, 0, sizeof g_global);
     memset(g_live, 0, sizeof g_live);
+    memset(g_live_barred, 0, sizeof g_live_barred);
     g_live_quiet = 0, g_live_first = true;
     active_slot = -1;
     toast_head = toast_n = 0;
     FILE *f = fopen(path, "r");
     char line[600];
     int cur = -1;
-    // Format: "@<tab>path of a game_data.sav<tab>file time", then its lines "id<tab>unix time"; "@<tab>*" the ones kept
-    // for every save (ACH_MASTER). (Records of whole profile folders, from builds that kept one per playthrough, are
+    // Format: "@<tab>path of a game_data.sav<tab>file time", then its lines "id<tab>unix time", and "~id" for those met
+    // with an assist on; "@<tab>*" the ones kept for every save (ACH_MASTER). (Records of whole profile folders, from builds that kept one per playthrough, are
     // dropped: the saves are read again anyway.)
     while (f && fgets(line, sizeof line, f)) {
         line[strcspn(line, "\r\n")] = 0;
@@ -342,6 +346,10 @@ void ach_state_load(const char *path) {
             continue;
         }
         if (cur == -1 || line[0] == '!') continue;  // (no record / an older build's notes)
+        if (line[0] == '~' && cur >= 0 && find_id(line + 1) >= 0) {
+            slots[cur].barred[find_id(line + 1)] = true;
+            continue;
+        }
         char *tab = strchr(line, '\t');
         long long at = tab ? atoll(tab + 1) : 0;
         if (tab) *tab = 0;
@@ -363,13 +371,15 @@ static void state_save_locked(void) {  // (lock held)
     snprintf(tmp, sizeof tmp, "%s.tmp", state_path);
     FILE *f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "# Savage Wind achievements, per save: \"@<tab>save file<tab>file time\", then id <tab> unlock time (unix) for each.\n");
+    fprintf(f, "# Savage Wind achievements, per save: \"@<tab>save file<tab>file time\", then id <tab> unlock time (unix) for each,\n");
+    fprintf(f, "# ~id for those met with an assist on.\n");
     for (int k = 0; k < MAX_SLOTS; k++) {
         const Slot *sl = &slots[k];
         if (!sl->used) continue;
         fprintf(f, "@\t%s\t%lld\n", sl->key, (long long)sl->written);
         for (int i = 0; i < g_ach_count && i < MAX_ACH; i++)
             if (sl->unlocked[i]) fprintf(f, "%s\t%lld\n", g_ach_defs[i].id, (long long)sl->at[i]);
+            else if (sl->barred[i]) fprintf(f, "~%s\n", g_ach_defs[i].id);
         for (int i = 0; i < sl->n_extra; i++) fprintf(f, "%s\n", sl->extra[i]);
     }
     bool any = false;
@@ -389,6 +399,12 @@ static void state_save_locked(void) {  // (lock held)
 void ach_set_blocked(bool b) {
     pthread_mutex_lock(&lock);
     blocked = b;
+    pthread_mutex_unlock(&lock);
+}
+
+void ach_set_assisted(bool a) {
+    pthread_mutex_lock(&lock);
+    assisted = a;
     pthread_mutex_unlock(&lock);
 }
 
@@ -449,16 +465,26 @@ int ach_update(const char *save_path, const AchSave *s, time_t now) { return ach
 static bool settle(Slot *sl, const Slot *prev, int i, bool met, time_t now, bool play, int *fresh) {
     bool had = (prev && prev->unlocked[i]) || g_live[i];  // (g_live: announced already, as it happened)
     if (!met) {
-        if (!sl->unlocked[i]) return false;
-        sl->unlocked[i] = false, sl->at[i] = 0;  // (a save of another playthrough written over this one)
+        if (!sl->unlocked[i] && !sl->barred[i]) return false;
+        sl->unlocked[i] = sl->barred[i] = false, sl->at[i] = 0;  // (a save of another playthrough written over this one)
         return true;
+    }
+    // Met with an assist on while playing: barred for good. A save the game writes takes it over from the one being
+    // played (or from the game's flags, met then), and has it barred itself when it is new in it while an assist is
+    // on; what the one being played had unlocked stays unlocked. A save only read keeps its own.
+    bool prev_has = play && prev && prev->unlocked[i];
+    bool bar = play ? !prev_has && ((prev && prev->barred[i]) || g_live_barred[i] || assisted) : sl->barred[i];
+    if (bar) {
+        bool changed = sl->unlocked[i] || !sl->barred[i];
+        sl->barred[i] = true, sl->unlocked[i] = false, sl->at[i] = 0;
+        return changed;
     }
     if (blocked) return false;
     // what the save had before doesn't matter for the notice (the slot may hold another playthrough's old save): only
     // what the save being played had
-    time_t at = play ? (had && prev->at[i] ? prev->at[i] : now) : sl->unlocked[i] ? sl->at[i] : now;
-    bool changed = !sl->unlocked[i] || sl->at[i] != at;
-    sl->unlocked[i] = true, sl->at[i] = at;
+    time_t at = play ? (had && prev && prev->at[i] ? prev->at[i] : now) : sl->unlocked[i] ? sl->at[i] : now;
+    bool changed = !sl->unlocked[i] || sl->barred[i] || sl->at[i] != at;
+    sl->unlocked[i] = true, sl->barred[i] = false, sl->at[i] = at;
     if (play && !had && toast_n < MAX_TOAST) {
         toasts[(toast_head + toast_n++) % MAX_TOAST] = i;
         (*fresh)++;
@@ -516,7 +542,7 @@ int ach_update_at(const char *save_path, const AchSave *s, time_t now, time_t wr
             if (master) ach_save_get_named(s, g_ach_defs[i].flag, &raw);
             bool more = prev && raw > prev->raw[i];
             sl->raw[i] = raw;
-            if (met && master && play && more && !g_global[i] && !blocked) {
+            if (met && master && play && more && !g_global[i] && !blocked && !assisted) {
                 g_global[i] = true, g_global_at[i] = now, dirty = true;
                 if (play && toast_n < MAX_TOAST) toasts[(toast_head + toast_n++) % MAX_TOAST] = i, fresh++;
                 for (int k2 = 0; k2 < MAX_SLOTS; k2++) {  // (the other saves have it too, and count it for ACH_META)
@@ -579,13 +605,19 @@ int ach_live_update(const AchSave *s, time_t now) {
     for (int i = 0; i < g_ach_count && i < MAX_ACH; i++) {
         bool news = met[i] && !g_live[i];
         g_live[i] = met[i];
+        if (!met[i]) g_live_barred[i] = false;
         if (!news || quiet || blocked) continue;
+        if (assisted || g_live_barred[i] || (sl && sl->barred[i])) {  // (an assist on: barred for the playthrough)
+            g_live_barred[i] = true;
+            if (sl && !sl->unlocked[i] && !sl->barred[i]) sl->barred[i] = true, dirty = true;
+            continue;
+        }
         if (sl && !sl->unlocked[i]) sl->unlocked[i] = true, sl->at[i] = now, dirty = true;
         if (toast_n < MAX_TOAST) toasts[(toast_head + toast_n++) % MAX_TOAST] = i, fresh++;
     }
     // ACH_META: the save being played with every other one (after them: its notice comes last)
-    for (int i = 0; sl && !quiet && !blocked && i < g_ach_count && i < MAX_ACH; i++) {
-        if (g_ach_defs[i].kind != ACH_META || sl->unlocked[i]) continue;
+    for (int i = 0; sl && !quiet && !blocked && !assisted && i < g_ach_count && i < MAX_ACH; i++) {
+        if (g_ach_defs[i].kind != ACH_META || sl->unlocked[i] || sl->barred[i]) continue;
         uint32_t have = 0, all = 0;
         for (int j = 0; j < g_ach_count && j < MAX_ACH; j++)
             if (g_ach_defs[j].kind != ACH_META) all++, have += sl->unlocked[j];
@@ -608,6 +640,7 @@ void ach_info(int i, AchInfo *out) {
     if (k >= 0) {
         const Slot *sl = &slots[k];
         out->unlocked = sl->unlocked[i];
+        out->barred = sl->barred[i] && !sl->unlocked[i];
         out->at = sl->at[i];
         out->cur = sl->unlocked[i] && sl->target[i] ? sl->target[i] : sl->cur[i];
         out->target = sl->target[i];

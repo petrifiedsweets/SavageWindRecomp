@@ -108,6 +108,7 @@ static void *live_thread(void *arg) {
                 }
                 img_n = n_flags;
                 AchSave s = {img, n};
+                ach_block_check();
                 int fresh = ach_live_update(&s, time(NULL));
                 if (fresh) LOG("[achievements] %d new from the game's flags\n", fresh);
             }
