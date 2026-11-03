@@ -751,7 +751,7 @@ void build_items(void) {
 
     // Achievements (runtime/achievements.h): one row per achievement, its state where a button's text goes (Unlocked, or
     // how far along it is, or Locked, or Assisted); the description line says what it takes, and when it was unlocked. A
-// does nothing.
+    // does nothing.
     for (int i = 0; i < g_ach_count; i++) {
         Item it = button(P_ACHIEVEMENTS, g_ach_defs[i].name, g_ach_defs[i].desc, nullptr, A_NONE, i);
         it.label = [](const Item &row, int) -> const char * {
