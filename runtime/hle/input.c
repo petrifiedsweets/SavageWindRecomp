@@ -819,6 +819,8 @@ static void fill_state(Cpu *c) {
     bool menu = (!win_focused && !host_test) || menu_input_captured();  // host controls belong to the focused game window
     uint64_t b = menu ? script_buttons : key_buttons | pad_buttons | escape_buttons | script_buttons;
     b=pc_cursor_buttons(b);
+    extern bool game_options_hold_a(void);  // runtime/ui/game_options.mm: the Achievements page is up
+    if (game_options_hold_a()) b &= ~(1ull << BTN_A);
     {   // injected Plus: held for ~10 presented frames (the game polls several times per frame)
         extern uint64_t renderer_present_count(void);
         static uint64_t until;
